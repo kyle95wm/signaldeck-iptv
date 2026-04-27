@@ -704,7 +704,14 @@ export default function App() {
     const input = commandInputRef.current;
     if (input) {
       input.focus();
-      input.select();
+    }
+
+    return undefined;
+  }, [isSearchPaletteOpen]);
+
+  useEffect(() => {
+    if (!isSearchPaletteOpen) {
+      return undefined;
     }
 
     const handleKeyDown = (event) => {
