@@ -9,6 +9,11 @@ function canUseNativeHls(video) {
   return Boolean(video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL'));
 }
 
+function getDecodedAudioBytes(video) {
+  const decodedBytes = video?.webkitAudioDecodedByteCount;
+  return typeof decodedBytes === 'number' && Number.isFinite(decodedBytes) ? decodedBytes : null;
+}
+
 export default function PlayerPanel({ source, title, subtitle, poster, onCompatFallback }) {
   const videoRef = useRef(null);
   const [volume, setVolume] = useState(1);
@@ -24,6 +29,8 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
 
     let cancelled = false;
     let hls;
+    let compatCheckTimer = null;
+    let compatCheckStarted = false;
     setPlayerError('');
 
     const requestCompatFallback = () => {
@@ -32,6 +39,43 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
       }
 
       return false;
+    };
+
+    const clearCompatCheck = () => {
+      if (compatCheckTimer) {
+        window.clearTimeout(compatCheckTimer);
+        compatCheckTimer = null;
+      }
+    };
+
+    const scheduleCompatCheck = () => {
+      if (compatCheckStarted || video.muted || video.volume === 0) {
+        return;
+      }
+
+      const initialDecodedBytes = getDecodedAudioBytes(video);
+      if (initialDecodedBytes === null) {
+        return;
+      }
+
+      const initialTime = video.currentTime;
+      compatCheckStarted = true;
+      clearCompatCheck();
+      compatCheckTimer = window.setTimeout(() => {
+        compatCheckTimer = null;
+
+        if (cancelled || video.paused || video.ended || video.muted || video.volume === 0) {
+          return;
+        }
+
+        const elapsedTime = video.currentTime - initialTime;
+        const nextDecodedBytes = getDecodedAudioBytes(video);
+        if (elapsedTime >= 2 && nextDecodedBytes !== null && nextDecodedBytes <= initialDecodedBytes) {
+          if (requestCompatFallback()) {
+            setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+          }
+        }
+      }, 4000);
     };
 
     const attemptPlayback = () => {
@@ -50,6 +94,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
     };
 
     video.addEventListener('error', onVideoError);
+    video.addEventListener('playing', scheduleCompatCheck, { once: true });
 
     async function loadSource() {
       if (isHls && canUseNativeHls(video)) {
@@ -101,7 +146,9 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
 
     return () => {
       cancelled = true;
+      clearCompatCheck();
       video.removeEventListener('error', onVideoError);
+      video.removeEventListener('playing', scheduleCompatCheck);
       if (hls) {
         hls.destroy();
       }
