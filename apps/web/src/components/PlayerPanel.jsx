@@ -2,11 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { AlertCircle, Maximize, Pause, Play, Volume2 } from 'lucide-react';
 
+function canFullscreenVideo(video) {
+  if (!video) {
+    return false;
+  }
+
+  return Boolean(video.requestFullscreen || video.webkitEnterFullscreen || video.webkitRequestFullscreen);
+}
+
 export default function PlayerPanel({ source, title, subtitle, poster }) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [playerError, setPlayerError] = useState('');
+  const [fullscreenAvailable, setFullscreenAvailable] = useState(false);
 
   const isHls = useMemo(() => source?.extension === 'm3u8', [source?.extension]);
 
@@ -67,6 +76,8 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
       return undefined;
     }
 
+    setFullscreenAvailable(canFullscreenVideo(video));
+
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     video.addEventListener('play', onPlay);
@@ -96,13 +107,40 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
 
   function toggleFullscreen() {
     const video = videoRef.current;
-    if (!video?.requestFullscreen) {
+    if (!video) {
       return;
     }
 
-    video.requestFullscreen().catch(() => {
+    if (video.requestFullscreen) {
+      video.requestFullscreen().catch(() => {
+        setPlayerError('Fullscreen is not available in this browser.');
+      });
+      return;
+    }
+
+    if (video.webkitRequestFullscreen) {
+      video.webkitRequestFullscreen();
+      return;
+    }
+
+    if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      return;
+    }
+
+    setPlayerError('Fullscreen is not available in this browser.');
+  }
+
+  function handleFullscreenClick() {
+    if (!source?.url) {
+      return;
+    }
+
+    try {
+      toggleFullscreen();
+    } catch {
       setPlayerError('Fullscreen is not available in this browser.');
-    });
+    }
   }
 
   function updateVolume(nextVolume) {
@@ -141,7 +179,7 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
             {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             {isPlaying ? 'Pause' : 'Play'}
           </button>
-          <button type="button" onClick={toggleFullscreen} disabled={!source?.url}>
+          <button type="button" onClick={handleFullscreenClick} disabled={!source?.url || !fullscreenAvailable}>
             <Maximize size={16} />
             Fullscreen
           </button>

@@ -67,6 +67,23 @@ The app uses the Xtream Codes API to load live categories, live streams, VOD cat
 
 For live channels, the app also loads short EPG data and shows current and upcoming programming when the provider exposes guide data.
 
+## Mobile browser support
+
+The web UI is responsive and intended to work in current mobile browsers.
+
+Expected support:
+
+- iPhone Safari: Supported for browsing and HLS playback. Inline playback is enabled, and fullscreen now falls back to the iOS video fullscreen API when the standard Fullscreen API is unavailable.
+- Android Chrome: Supported for browsing, HLS playback through `hls.js`, and standard fullscreen behavior.
+- iPad Safari and Chrome on iPad: Supported, with behavior closest to desktop Safari because both use WebKit.
+
+Known mobile limits:
+
+- HLS (`.m3u8`) is the preferred live format on mobile. MPEG-TS (`.ts`) is less reliable across mobile browsers.
+- Browser autoplay rules still apply. Some devices require an explicit tap on Play before video starts.
+- Fullscreen behavior is browser-specific and may differ slightly between iOS and Android.
+- Older or embedded in-app browsers may be missing APIs used by the app, including local storage and modern media playback features.
+
 ## Limitations
 
 - Some providers return codecs or transport formats that certain browsers cannot decode.

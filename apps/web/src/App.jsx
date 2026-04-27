@@ -647,16 +647,18 @@ export default function App() {
         </section>
 
         <section className="panel-card playback-card">
-          <PlayerPanel
-            source={playbackSource}
-            title={selectedItem?.name}
-            subtitle={
-              currentProgram
-                ? `${formatGuideRange(currentProgram)}  ${currentProgram.title}`
-                : selectedItem?.plot || selectedItem?.epgChannelId || 'Select a title to inspect it here.'
-            }
-            poster={selectedItem?.logo}
-          />
+          <div className="playback-player-sticky">
+            <PlayerPanel
+              source={playbackSource}
+              title={selectedItem?.name}
+              subtitle={
+                currentProgram
+                  ? `${formatGuideRange(currentProgram)}  ${currentProgram.title}`
+                  : selectedItem?.plot || selectedItem?.epgChannelId || 'Select a title to inspect it here.'
+              }
+              poster={selectedItem?.logo}
+            />
+          </div>
 
           {contentType === 'live' ? (
             <section className="epg-panel">
