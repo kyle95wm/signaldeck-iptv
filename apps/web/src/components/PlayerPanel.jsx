@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Hls from 'hls.js';
 import { AlertCircle, Maximize, Pause, Play, Volume2 } from 'lucide-react';
 
 function canFullscreenVideo(video) {
@@ -8,6 +7,14 @@ function canFullscreenVideo(video) {
   }
 
   return Boolean(video.requestFullscreen || video.webkitEnterFullscreen || video.webkitRequestFullscreen);
+}
+
+function canUseNativeHls(video) {
+  if (!video?.canPlayType) {
+    return false;
+  }
+
+  return Boolean(video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL'));
 }
 
 export default function PlayerPanel({ source, title, subtitle, poster }) {
@@ -25,6 +32,7 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
       return undefined;
     }
 
+    let cancelled = false;
     let hls;
     setPlayerError('');
     setIsPlaying(false);
@@ -41,25 +49,46 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
 
     video.addEventListener('error', onVideoError);
 
-    if (isHls && Hls.isSupported()) {
-      hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
-      hls.on(Hls.Events.MANIFEST_PARSED, attemptPlayback);
-      hls.loadSource(source.url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          setPlayerError('This stream could not be decoded in the browser. Try another output format.');
+    async function loadSource() {
+      if (isHls && canUseNativeHls(video)) {
+        video.addEventListener('loadedmetadata', attemptPlayback, { once: true });
+        video.src = source.url;
+        return;
+      }
+
+      if (isHls) {
+        const { default: Hls } = await import('hls.js');
+        if (cancelled) {
+          return;
         }
-      });
-    } else {
+
+        if (Hls.isSupported()) {
+          hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+          });
+          hls.on(Hls.Events.MANIFEST_PARSED, attemptPlayback);
+          hls.loadSource(source.url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) {
+              setPlayerError('This stream could not be decoded in the browser. Try another output format.');
+            }
+          });
+          return;
+        }
+      }
+
       video.addEventListener('loadedmetadata', attemptPlayback, { once: true });
       video.src = source.url;
     }
 
+    loadSource().catch(() => {
+      setPlayerError('The player failed to initialize this stream. Try another output format.');
+    });
+
     return () => {
+      cancelled = true;
       video.removeEventListener('error', onVideoError);
       if (hls) {
         hls.destroy();

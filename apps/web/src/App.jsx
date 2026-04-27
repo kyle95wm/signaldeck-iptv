@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Bolt, Film, Heart, Radio, Search, ShieldCheck, Tv2 } from 'lucide-react';
-import PlayerPanel from './components/PlayerPanel';
+import VirtualizedStreamList from './components/VirtualizedStreamList';
 
 const sessionKey = 'signaldeck-session';
 const favoritesKey = 'signaldeck-favorites';
@@ -9,6 +9,19 @@ const views = [
   { id: 'live', label: 'Live TV', icon: Radio },
   { id: 'vod', label: 'Movies', icon: Film },
 ];
+
+const PlayerPanel = lazy(() => import('./components/PlayerPanel'));
+
+const guideTimeFormatter = new Intl.DateTimeFormat([], {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+const guideDayFormatter = new Intl.DateTimeFormat([], {
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
 
 function getGuideTimestamp(value) {
   if (!value) {
@@ -26,10 +39,7 @@ function formatGuideTime(value) {
     return 'TBD';
   }
 
-  return new Intl.DateTimeFormat([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(timestamp);
+  return guideTimeFormatter.format(timestamp);
 }
 
 function formatGuideRange(entry) {
@@ -59,33 +69,33 @@ function formatGuideDayLabel(dayKey) {
     return 'Tomorrow';
   }
 
-  return new Intl.DateTimeFormat([], {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  }).format(dayDate);
+  return guideDayFormatter.format(dayDate);
 }
 
 function getGuideSummary(listings, nowMs) {
-  const sortedListings = [...(listings || [])].sort((left, right) => {
-    return (getGuideTimestamp(left.start) ?? Number.MAX_SAFE_INTEGER)
-      - (getGuideTimestamp(right.start) ?? Number.MAX_SAFE_INTEGER);
+  const sortedListings = (listings || []).map((entry) => {
+    const startMs = getGuideTimestamp(entry.start);
+    const endMs = getGuideTimestamp(entry.end);
+    return {
+      ...entry,
+      startMs,
+      endMs,
+    };
+  }).sort((left, right) => {
+    return (left.startMs ?? Number.MAX_SAFE_INTEGER) - (right.startMs ?? Number.MAX_SAFE_INTEGER);
   });
 
   const current = sortedListings.find((entry) => {
-    const start = getGuideTimestamp(entry.start);
-    const end = getGuideTimestamp(entry.end);
-    return start !== null && end !== null && nowMs >= start && nowMs < end;
+    return entry.startMs !== null && entry.endMs !== null && nowMs >= entry.startMs && nowMs < entry.endMs;
   }) || null;
 
   const upcoming = sortedListings.filter((entry) => {
-    const start = getGuideTimestamp(entry.start);
-    return start !== null && start >= nowMs;
+    return entry.startMs !== null && entry.startMs >= nowMs;
   });
 
   const featured = current || upcoming[0] || sortedListings[0] || null;
   const next = current
-    ? sortedListings.filter((entry) => (getGuideTimestamp(entry.start) ?? 0) >= (getGuideTimestamp(current.end) ?? 0))
+    ? sortedListings.filter((entry) => (entry.startMs ?? 0) >= (current.endMs ?? 0))
     : upcoming.slice(featured ? 1 : 0);
 
   return {
@@ -100,8 +110,8 @@ function getProgramProgress(entry, nowMs) {
     return 0;
   }
 
-  const start = getGuideTimestamp(entry.start);
-  const end = getGuideTimestamp(entry.end);
+  const start = entry.startMs ?? getGuideTimestamp(entry.start);
+  const end = entry.endMs ?? getGuideTimestamp(entry.end);
   if (start === null || end === null || end <= start) {
     return 0;
   }
@@ -168,6 +178,16 @@ function buildPlaybackSource(session, item, outputFormat) {
   };
 }
 
+function shouldUsePlainStreamList() {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const platform = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(platform)
+    || (platform.includes('Mac') && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1);
+}
+
 export default function App() {
   const [credentials, setCredentials] = useState({ serverUrl: '', username: '', password: '' });
   const [session, setSession] = useState(() => readStorage(sessionKey, null));
@@ -178,12 +198,18 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedItem, setSelectedItem] = useState(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState({ loading: false, error: '', authLoading: false });
   const [liveFormat, setLiveFormat] = useState(() => getPreferredLiveFormat(readStorage(sessionKey, null)));
   const [epg, setEpg] = useState({ loading: false, error: '', listings: [] });
   const [channelGuideMap, setChannelGuideMap] = useState({});
   const [guideDay, setGuideDay] = useState('');
   const [guideNow, setGuideNow] = useState(() => Date.now());
+  const [viewportWidth, setViewportWidth] = useState(() => {
+    return typeof window === 'undefined' ? 1280 : window.innerWidth;
+  });
+  const [usePlainStreamList] = useState(() => shouldUsePlainStreamList());
+  const [plainVisibleCount, setPlainVisibleCount] = useState(0);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -191,6 +217,15 @@ export default function App() {
     }, 60000);
 
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => {
@@ -216,6 +251,14 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     if (!session) {
       return;
     }
@@ -233,8 +276,8 @@ export default function App() {
       if (selectedCategory) {
         params.set('categoryId', selectedCategory);
       }
-      if (search) {
-        params.set('search', search);
+      if (debouncedSearch) {
+        params.set('search', debouncedSearch);
       }
 
       try {
@@ -268,7 +311,7 @@ export default function App() {
 
     loadCatalog();
     return () => controller.abort();
-  }, [contentType, search, selectedCategory, session]);
+  }, [contentType, debouncedSearch, selectedCategory, session]);
 
   useEffect(() => {
     if (!session || contentType !== 'live' || !selectedItem?.id) {
@@ -313,7 +356,7 @@ export default function App() {
   }, [contentType, selectedItem?.id, session]);
 
   useEffect(() => {
-    if (!session || contentType !== 'live' || !items.length) {
+    if (!session || contentType !== 'live' || !items.length || usePlainStreamList) {
       setChannelGuideMap({});
       return;
     }
@@ -347,10 +390,33 @@ export default function App() {
 
     loadChannelSnapshots();
     return () => controller.abort();
-  }, [contentType, items, session]);
+  }, [contentType, items, session, usePlainStreamList]);
 
   const favoriteIds = useMemo(() => new Set(favorites), [favorites]);
   const liveFormatOptions = useMemo(() => getAllowedLiveFormats(session), [session]);
+  const streamItemHeight = useMemo(() => {
+    const compactLayout = viewportWidth <= 760;
+    if (contentType === 'live') {
+      return compactLayout ? 148 : 118;
+    }
+
+    return compactLayout ? 104 : 88;
+  }, [contentType, viewportWidth]);
+  const plainPageSize = useMemo(() => {
+    const compactLayout = viewportWidth <= 760;
+    if (contentType === 'live') {
+      return compactLayout ? 40 : 56;
+    }
+
+    return compactLayout ? 48 : 64;
+  }, [contentType, viewportWidth]);
+  const plainVisibleItems = useMemo(() => {
+    if (!usePlainStreamList) {
+      return items;
+    }
+
+    return items.slice(0, plainVisibleCount);
+  }, [items, plainVisibleCount, usePlainStreamList]);
   const playbackSource = useMemo(
     () => buildPlaybackSource(session, selectedItem, liveFormat),
     [liveFormat, selectedItem, session],
@@ -388,6 +454,14 @@ export default function App() {
       setGuideDay(guideDays[0].key);
     }
   }, [guideDay, guideDays]);
+
+  useEffect(() => {
+    if (!usePlainStreamList) {
+      return;
+    }
+
+    setPlainVisibleCount(plainPageSize);
+  }, [items, plainPageSize, usePlainStreamList]);
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -596,68 +670,125 @@ export default function App() {
                 <div className="empty-message">No streams match the current filter.</div>
               ) : null}
 
-              <div className="stream-grid">
-                {items.map((item) => {
-                  const favoriteKey = `${item.type}:${item.id}`;
-                  const isFavorite = favoriteIds.has(favoriteKey);
-                  const itemGuide = channelGuideSummaries[item.id];
-                  const itemProgram = itemGuide?.current || itemGuide?.featured || null;
-                  const itemProgress = getProgramProgress(itemGuide?.current, guideNow);
-                  return (
-                    <article
-                      key={item.id}
-                      className={selectedItem?.id === item.id ? 'stream-card active' : 'stream-card'}
-                      onClick={() => setSelectedItem(item)}
-                    >
-                      <div className="stream-card-media">
-                        {item.logo ? <img src={item.logo} alt="" loading="lazy" /> : <Radio size={18} />}
-                      </div>
-                      <div className="stream-card-copy">
-                        <h3>{item.name}</h3>
-                        {contentType === 'live' && itemProgram ? (
-                          <>
-                            <p className="stream-program">{itemProgram.title}</p>
-                            <p>{formatGuideRange(itemProgram)}</p>
-                            {itemGuide?.current ? (
-                              <div className="stream-progress-track">
-                                <span style={{ width: `${itemProgress}%` }} />
-                              </div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <p>{item.categoryId || 'Unsorted'}</p>
-                        )}
-                      </div>
+              {usePlainStreamList ? (
+                <>
+                  <div className="stream-grid">
+                  {plainVisibleItems.map((item) => {
+                    const favoriteKey = `${item.type}:${item.id}`;
+                    const isFavorite = favoriteIds.has(favoriteKey);
+
+                    return (
+                      <article
+                        key={item.id}
+                        className={selectedItem?.id === item.id ? 'stream-card active' : 'stream-card'}
+                        onClick={() => setSelectedItem(item)}
+                      >
+                        <div className="stream-card-media">
+                          {item.logo ? <img src={item.logo} alt="" loading="lazy" /> : <Radio size={18} />}
+                        </div>
+                        <div className="stream-card-copy">
+                          <h3>{item.name}</h3>
+                          <p>{contentType === 'live' ? 'Tap to play' : item.categoryId || 'Unsorted'}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className={isFavorite ? 'favorite-button active' : 'favorite-button'}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleFavorite(item);
+                          }}
+                        >
+                          <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
+                        </button>
+                      </article>
+                    );
+                  })}
+                  </div>
+                  {plainVisibleCount < items.length ? (
+                    <div className="stream-grid-footer">
                       <button
                         type="button"
-                        className={isFavorite ? 'favorite-button active' : 'favorite-button'}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleFavorite(item);
-                        }}
+                        className="secondary-button"
+                        onClick={() => setPlainVisibleCount((current) => current + plainPageSize)}
                       >
-                        <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
+                        Load {Math.min(plainPageSize, items.length - plainVisibleCount)} more {contentType === 'live' ? 'channels' : 'titles'}
                       </button>
-                    </article>
-                  );
-                })}
-              </div>
+                      <p>
+                        Showing {plainVisibleItems.length} of {items.length}
+                      </p>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <VirtualizedStreamList
+                  className="stream-grid"
+                  items={items}
+                  itemHeight={streamItemHeight}
+                  itemKey={(item) => item.id}
+                  renderItem={(item) => {
+                    const favoriteKey = `${item.type}:${item.id}`;
+                    const isFavorite = favoriteIds.has(favoriteKey);
+                    const itemGuide = channelGuideSummaries[item.id];
+                    const itemProgram = itemGuide?.current || itemGuide?.featured || null;
+                    const itemProgress = getProgramProgress(itemGuide?.current, guideNow);
+
+                    return (
+                      <article
+                        className={selectedItem?.id === item.id ? 'stream-card active' : 'stream-card'}
+                        onClick={() => setSelectedItem(item)}
+                      >
+                        <div className="stream-card-media">
+                          {item.logo ? <img src={item.logo} alt="" loading="lazy" /> : <Radio size={18} />}
+                        </div>
+                        <div className="stream-card-copy">
+                          <h3>{item.name}</h3>
+                          {contentType === 'live' && itemProgram ? (
+                            <>
+                              <p className="stream-program">{itemProgram.title}</p>
+                              <p>{formatGuideRange(itemProgram)}</p>
+                              {itemGuide?.current ? (
+                                <div className="stream-progress-track">
+                                  <span style={{ width: `${itemProgress}%` }} />
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <p>{item.categoryId || 'Unsorted'}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className={isFavorite ? 'favorite-button active' : 'favorite-button'}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleFavorite(item);
+                          }}
+                        >
+                          <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
+                        </button>
+                      </article>
+                    );
+                  }}
+                />
+              )}
             </div>
           </div>
         </section>
 
         <section className="panel-card playback-card">
           <div className="playback-player-sticky">
-            <PlayerPanel
-              source={playbackSource}
-              title={selectedItem?.name}
-              subtitle={
-                currentProgram
-                  ? `${formatGuideRange(currentProgram)}  ${currentProgram.title}`
-                  : selectedItem?.plot || selectedItem?.epgChannelId || 'Select a title to inspect it here.'
-              }
-              poster={selectedItem?.logo}
-            />
+            <Suspense fallback={<div className="player-panel-skeleton">Loading player...</div>}>
+              <PlayerPanel
+                source={playbackSource}
+                title={selectedItem?.name}
+                subtitle={
+                  currentProgram
+                    ? `${formatGuideRange(currentProgram)}  ${currentProgram.title}`
+                    : selectedItem?.plot || selectedItem?.epgChannelId || 'Select a title to inspect it here.'
+                }
+                poster={selectedItem?.logo}
+              />
+            </Suspense>
           </div>
 
           {contentType === 'live' ? (
