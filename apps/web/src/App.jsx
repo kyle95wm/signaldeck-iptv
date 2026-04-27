@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Bolt, Film, Heart, Radio, Search, ShieldCheck, Tv2 } from 'lucide-react';
+import { Film, Heart, Radio, Search, SlidersHorizontal, X } from 'lucide-react';
 import VirtualizedStreamList from './components/VirtualizedStreamList';
 
 const sessionKey = 'signaldeck-session';
@@ -210,6 +210,8 @@ export default function App() {
   });
   const [usePlainStreamList] = useState(() => shouldUsePlainStreamList());
   const [plainVisibleCount, setPlainVisibleCount] = useState(0);
+  const [isBrowseMenuOpen, setIsBrowseMenuOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -463,6 +465,22 @@ export default function App() {
     setPlainVisibleCount(plainPageSize);
   }, [items, plainPageSize, usePlainStreamList]);
 
+  useEffect(() => {
+    if (!isBrowseMenuOpen && !isAccountMenuOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsBrowseMenuOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAccountMenuOpen, isBrowseMenuOpen]);
+
   async function handleLogin(event) {
     event.preventDefault();
     setStatus((current) => ({ ...current, authLoading: true, error: '' }));
@@ -480,6 +498,7 @@ export default function App() {
 
       setSession(payload);
       setSelectedCategory('');
+      setIsAccountMenuOpen(false);
     } catch (error) {
       setStatus((current) => ({
         ...current,
@@ -503,6 +522,8 @@ export default function App() {
   }
 
   function logout() {
+    setIsBrowseMenuOpen(false);
+    setIsAccountMenuOpen(false);
     setSession(null);
     setItems([]);
     setCategories([]);
@@ -510,88 +531,216 @@ export default function App() {
     setSelectedCategory('');
   }
 
+  const selectedCategoryLabel = categories.find((category) => category.id === selectedCategory)?.name || 'All categories';
+  const activeConnections = session?.userInfo?.active_cons;
+  const maxConnections = session?.userInfo?.max_connections;
+
+  function toggleBrowseMenu() {
+    setIsBrowseMenuOpen((current) => !current);
+    setIsAccountMenuOpen(false);
+  }
+
+  function toggleAccountMenu() {
+    setIsAccountMenuOpen((current) => !current);
+    setIsBrowseMenuOpen(false);
+  }
+
+  if (!session) {
+    return (
+      <div className="app-shell app-shell-auth">
+        <div className="app-bg app-bg-one" />
+        <div className="app-bg app-bg-two" />
+
+        <div className="app-topbar">
+          <div className="app-mark">
+            <span>SignalDeck</span>
+            <small>Sign in</small>
+          </div>
+        </div>
+
+        <main className="login-layout">
+          <section className="panel-card auth-screen-card">
+            <div className="auth-screen-copy">
+              <span className="auth-kicker">Xtream login</span>
+              <h1>Sign in to your IPTV provider.</h1>
+              <p>Enter your Xtream Codes server URL, username, and password to open your channels and on-demand library.</p>
+            </div>
+
+            <form className="auth-form" onSubmit={handleLogin}>
+              <label>
+                <span>Server URL</span>
+                <input
+                  name="serverUrl"
+                  placeholder="http://provider.example:8080"
+                  value={credentials.serverUrl}
+                  onChange={updateField}
+                />
+              </label>
+              <label>
+                <span>Username</span>
+                <input name="username" value={credentials.username} onChange={updateField} />
+              </label>
+              <label>
+                <span>Password</span>
+                <input
+                  name="password"
+                  type="password"
+                  value={credentials.password}
+                  onChange={updateField}
+                />
+              </label>
+              <button className="primary-button" type="submit" disabled={status.authLoading}>
+                {status.authLoading ? 'Connecting...' : 'Connect to Xtream'}
+              </button>
+            </form>
+
+            {status.error ? <div className="error-banner auth-error-banner">{status.error}</div> : null}
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <div className="app-bg app-bg-one" />
       <div className="app-bg app-bg-two" />
 
-      <header className="hero-card">
-        <div>
-          <span className="eyebrow">Docker-ready Xtream Codes client</span>
-          <h1>SignalDeck IPTV</h1>
-          <p>
-            Browse live channels and on-demand titles from your Xtream Codes provider in a
-            focused browser player with local favorites and proxied playback.
-          </p>
+      <div className="app-topbar">
+        <div className="app-mark">
+          <span>SignalDeck</span>
+          <small>{session?.userInfo?.username || 'Connected'}</small>
         </div>
 
-        <div className="hero-points">
-          <div>
-            <ShieldCheck size={18} />
-            <span>Credentials stay in your local session.</span>
-          </div>
-          <div>
-            <Tv2 size={18} />
-            <span>HLS manifests are proxied for smoother browser playback.</span>
-          </div>
-          <div>
-            <Bolt size={18} />
-            <span>Runs as a clean two-container Docker stack.</span>
-          </div>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className={isBrowseMenuOpen ? 'browse-menu-trigger active' : 'browse-menu-trigger'}
+            aria-expanded={isBrowseMenuOpen}
+            aria-controls="browse-menu"
+            onClick={toggleBrowseMenu}
+          >
+            <span>
+              <SlidersHorizontal size={16} />
+              Browse
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={isAccountMenuOpen ? 'account-menu-trigger active' : 'account-menu-trigger'}
+            aria-expanded={isAccountMenuOpen}
+            aria-controls="account-menu"
+            onClick={toggleAccountMenu}
+          >
+            <span>Account</span>
+            <strong>{session?.userInfo?.username || 'Connected'}</strong>
+          </button>
         </div>
-      </header>
+      </div>
 
-      <main className="layout-grid">
-        <section className="auth-card panel-card">
-          <div className="section-heading">
-            <h2>Connection</h2>
-            {session ? <button onClick={logout}>Disconnect</button> : null}
+      {isBrowseMenuOpen ? (
+        <>
+          <button
+            type="button"
+            className="browse-menu-backdrop"
+            aria-label="Close browse menu"
+            onClick={() => setIsBrowseMenuOpen(false)}
+          />
+          <div className="browse-menu" id="browse-menu">
+            <div className="browse-menu-header">
+              <div>
+                <h3>Browse filters</h3>
+                <p>Search and jump between categories without cluttering the main layout.</p>
+              </div>
+              <button
+                type="button"
+                className="browse-menu-close"
+                onClick={() => setIsBrowseMenuOpen(false)}
+                aria-label="Close browse menu"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="search-field browse-menu-search">
+              <Search size={16} />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search streams"
+              />
+            </label>
+
+            <div className="browse-menu-categories">
+              <button
+                className={!selectedCategory ? 'category-pill active' : 'category-pill'}
+                type="button"
+                onClick={() => {
+                  setSelectedCategory('');
+                  setIsBrowseMenuOpen(false);
+                }}
+              >
+                All categories
+              </button>
+              {categories.map((category) => (
+                <button
+                  key={category.id}
+                  className={selectedCategory === category.id ? 'category-pill active' : 'category-pill'}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory(category.id);
+                    setIsBrowseMenuOpen(false);
+                  }}
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
           </div>
+        </>
+      ) : null}
 
-          <form className="auth-form" onSubmit={handleLogin}>
-            <label>
-              <span>Server URL</span>
-              <input
-                name="serverUrl"
-                placeholder="http://provider.example:8080"
-                value={credentials.serverUrl}
-                onChange={updateField}
-              />
-            </label>
-            <label>
-              <span>Username</span>
-              <input name="username" value={credentials.username} onChange={updateField} />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                name="password"
-                type="password"
-                value={credentials.password}
-                onChange={updateField}
-              />
-            </label>
-            <button className="primary-button" type="submit" disabled={status.authLoading}>
-              {status.authLoading ? 'Connecting...' : 'Connect to Xtream'}
+      {isAccountMenuOpen ? (
+        <>
+          <button
+            type="button"
+            className="browse-menu-backdrop"
+            aria-label="Close account menu"
+            onClick={() => setIsAccountMenuOpen(false)}
+          />
+          <div className="account-menu" id="account-menu">
+            <div className="account-menu-copy">
+              <small>Connected account</small>
+              <h3>{session?.userInfo?.username || 'Unknown account'}</h3>
+              <p>{session?.serverUrl || credentials.serverUrl || 'Unknown server'}</p>
+            </div>
+
+            <div className="account-menu-meta">
+              <div>
+                <span>Status</span>
+                <strong>Connected</strong>
+              </div>
+              <div>
+                <span>Connections</span>
+                <strong>
+                  {activeConnections ?? '0'} / {maxConnections ?? 'Unknown'}
+                </strong>
+              </div>
+              <div>
+                <span>Expires</span>
+                <strong>{session?.userInfo?.exp_date || 'Unknown'}</strong>
+              </div>
+            </div>
+
+            <button type="button" className="account-disconnect-button" onClick={logout}>
+              Log out
             </button>
-          </form>
-
-          <div className="session-meta">
-            <div>
-              <span>Status</span>
-              <strong>{session ? 'Connected' : 'Idle'}</strong>
-            </div>
-            <div>
-              <span>Account</span>
-              <strong>{session?.userInfo?.username || 'Not signed in'}</strong>
-            </div>
-            <div>
-              <span>Expires</span>
-              <strong>{session?.userInfo?.exp_date || 'Unknown'}</strong>
-            </div>
           </div>
-        </section>
+        </>
+      ) : null}
 
+      <main className="layout-grid layout-grid-connected">
         <section className="browser-card panel-card">
           <div className="section-heading browser-toolbar">
             <div className="view-toggle">
@@ -605,6 +754,8 @@ export default function App() {
                     onClick={() => {
                       setContentType(view.id);
                       setSelectedCategory('');
+                      setSelectedItem(null);
+                      setIsBrowseMenuOpen(false);
                     }}
                   >
                     <Icon size={16} />
@@ -613,56 +764,30 @@ export default function App() {
                 );
               })}
             </div>
-
-            <label className="search-field">
-              <Search size={16} />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search streams"
-              />
-            </label>
           </div>
 
-          <div className="browser-layout">
-            <aside className="category-rail">
-              <button
-                className={!selectedCategory ? 'category-pill active' : 'category-pill'}
-                type="button"
-                onClick={() => setSelectedCategory('')}
-              >
-                All categories
-              </button>
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  className={selectedCategory === category.id ? 'category-pill active' : 'category-pill'}
-                  type="button"
-                  onClick={() => setSelectedCategory(category.id)}
-                >
-                  {category.name}
-                </button>
-              ))}
-            </aside>
-
+          <div className="browser-layout browser-layout-popout">
             <div className="content-list">
               <div className="list-header">
                 <div>
                   <h2>{contentType === 'live' ? 'Channels' : 'Movie catalog'}</h2>
                   <p>{items.length} results loaded</p>
                 </div>
-                {contentType === 'live' ? (
-                  <label className="format-select">
-                    Output
-                    <select value={liveFormat} onChange={(event) => setLiveFormat(event.target.value)}>
-                      {liveFormatOptions.map((format) => (
-                        <option key={format} value={format}>
-                          {format === 'm3u8' ? 'HLS (.m3u8)' : `${format.toUpperCase()} (.${format})`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
+                <div className="list-header-actions">
+                  <span className="browse-summary-pill">{selectedCategoryLabel}</span>
+                  {contentType === 'live' ? (
+                    <label className="format-select">
+                      Output
+                      <select value={liveFormat} onChange={(event) => setLiveFormat(event.target.value)}>
+                        {liveFormatOptions.map((format) => (
+                          <option key={format} value={format}>
+                            {format === 'm3u8' ? 'HLS (.m3u8)' : `${format.toUpperCase()} (.${format})`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
               </div>
 
               {status.loading ? <div className="empty-message">Loading catalog...</div> : null}

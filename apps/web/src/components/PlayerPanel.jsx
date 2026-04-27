@@ -1,13 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Maximize, Pause, Play, Volume2 } from 'lucide-react';
-
-function canFullscreenVideo(video) {
-  if (!video) {
-    return false;
-  }
-
-  return Boolean(video.requestFullscreen || video.webkitEnterFullscreen || video.webkitRequestFullscreen);
-}
+import { AlertCircle, Volume2 } from 'lucide-react';
 
 function canUseNativeHls(video) {
   if (!video?.canPlayType) {
@@ -19,10 +11,8 @@ function canUseNativeHls(video) {
 
 export default function PlayerPanel({ source, title, subtitle, poster }) {
   const videoRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [playerError, setPlayerError] = useState('');
-  const [fullscreenAvailable, setFullscreenAvailable] = useState(false);
 
   const isHls = useMemo(() => source?.extension === 'm3u8', [source?.extension]);
 
@@ -35,7 +25,6 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
     let cancelled = false;
     let hls;
     setPlayerError('');
-    setIsPlaying(false);
 
     const attemptPlayback = () => {
       video.play().catch(() => {
@@ -104,73 +93,8 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
     if (!video) {
       return undefined;
     }
-
-    setFullscreenAvailable(canFullscreenVideo(video));
-
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    video.addEventListener('play', onPlay);
-    video.addEventListener('pause', onPause);
-
-    return () => {
-      video.removeEventListener('play', onPlay);
-      video.removeEventListener('pause', onPause);
-    };
+    return undefined;
   }, []);
-
-  function togglePlayback() {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-
-    if (video.paused) {
-      video.play().catch(() => {
-        setPlayerError('Playback was blocked by the browser. Interact with the page and try again.');
-      });
-      return;
-    }
-
-    video.pause();
-  }
-
-  function toggleFullscreen() {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-
-    if (video.requestFullscreen) {
-      video.requestFullscreen().catch(() => {
-        setPlayerError('Fullscreen is not available in this browser.');
-      });
-      return;
-    }
-
-    if (video.webkitRequestFullscreen) {
-      video.webkitRequestFullscreen();
-      return;
-    }
-
-    if (video.webkitEnterFullscreen) {
-      video.webkitEnterFullscreen();
-      return;
-    }
-
-    setPlayerError('Fullscreen is not available in this browser.');
-  }
-
-  function handleFullscreenClick() {
-    if (!source?.url) {
-      return;
-    }
-
-    try {
-      toggleFullscreen();
-    } catch {
-      setPlayerError('Fullscreen is not available in this browser.');
-    }
-  }
 
   function updateVolume(nextVolume) {
     const numericVolume = Number(nextVolume);
@@ -201,17 +125,6 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
         <div>
           <h2>{title || 'Nothing selected'}</h2>
           <p>{subtitle || 'Your stream metadata will appear here.'}</p>
-        </div>
-
-        <div className="player-actions">
-          <button type="button" onClick={togglePlayback} disabled={!source?.url}>
-            {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-            {isPlaying ? 'Pause' : 'Play'}
-          </button>
-          <button type="button" onClick={handleFullscreenClick} disabled={!source?.url || !fullscreenAvailable}>
-            <Maximize size={16} />
-            Fullscreen
-          </button>
         </div>
       </div>
 
