@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Clapperboard, Film, Heart, Radio, Search, SlidersHorizontal, Tv, X } from 'lucide-react';
 import VirtualizedStreamList from './components/VirtualizedStreamList';
 
@@ -189,6 +189,27 @@ function shouldUsePlainStreamList() {
     || (platform.includes('Mac') && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1);
 }
 
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable;
+}
+
+function getItemTypeLabel(itemType) {
+  if (itemType === 'live') {
+    return 'Live TV';
+  }
+
+  if (itemType === 'series') {
+    return 'TV Series';
+  }
+
+  return 'Movies';
+}
+
 export default function App() {
   const [credentials, setCredentials] = useState({ serverUrl: '', username: '', password: '' });
   const [session, setSession] = useState(() => readStorage(sessionKey, null));
@@ -214,8 +235,14 @@ export default function App() {
   const [plainVisibleCount, setPlainVisibleCount] = useState(0);
   const [isBrowseMenuOpen, setIsBrowseMenuOpen] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isSearchPaletteOpen, setIsSearchPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
+  const [debouncedCommandQuery, setDebouncedCommandQuery] = useState('');
+  const [commandResults, setCommandResults] = useState({ loading: false, error: '', groups: [] });
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [seriesDetail, setSeriesDetail] = useState({ loading: false, error: '', series: null, seasons: [] });
   const [selectedSeasonKey, setSelectedSeasonKey] = useState('');
+  const commandInputRef = useRef(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -263,6 +290,14 @@ export default function App() {
 
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedCommandQuery(commandQuery);
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [commandQuery]);
 
   useEffect(() => {
     if (!session) {
@@ -485,6 +520,9 @@ export default function App() {
 
     return items.slice(0, plainVisibleCount);
   }, [items, plainVisibleCount, usePlainStreamList]);
+  const commandResultItems = useMemo(() => {
+    return commandResults.groups.flatMap((group) => group.items);
+  }, [commandResults.groups]);
   const activePlayableItem = useMemo(() => {
     return contentType === 'series' ? selectedEpisode : selectedItem;
   }, [contentType, selectedEpisode, selectedItem]);
@@ -535,7 +573,7 @@ export default function App() {
   }, [items, plainPageSize, usePlainStreamList]);
 
   useEffect(() => {
-    if (!isBrowseMenuOpen && !isAccountMenuOpen) {
+    if (!isBrowseMenuOpen && !isAccountMenuOpen && !isSearchPaletteOpen) {
       return undefined;
     }
 
@@ -543,12 +581,125 @@ export default function App() {
       if (event.key === 'Escape') {
         setIsBrowseMenuOpen(false);
         setIsAccountMenuOpen(false);
+        setIsSearchPaletteOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAccountMenuOpen, isBrowseMenuOpen]);
+  }, [isAccountMenuOpen, isBrowseMenuOpen, isSearchPaletteOpen]);
+
+  useEffect(() => {
+    if (!session || !isSearchPaletteOpen || !debouncedCommandQuery.trim()) {
+      setCommandResults({ loading: false, error: '', groups: [] });
+      setActiveCommandIndex(0);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadCommandResults() {
+      setCommandResults((current) => ({ ...current, loading: true, error: '' }));
+
+      try {
+        const groups = await Promise.all(
+          views.map(async (view) => {
+            const params = new URLSearchParams({
+              serverUrl: session.serverUrl,
+              username: session.username,
+              password: session.password,
+              contentType: view.id,
+              search: debouncedCommandQuery,
+            });
+
+            const response = await fetch(`/api/catalog?${params.toString()}`, { signal: controller.signal });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload.error || 'Unable to search the catalog.');
+            }
+
+            const categoryNames = new Map((payload.categories || []).map((category) => [String(category.id), category.name]));
+
+            return {
+              id: view.id,
+              label: view.label,
+              items: (payload.items || []).slice(0, 5).map((item) => ({
+                ...item,
+                categoryName: categoryNames.get(String(item.categoryId)) || '',
+              })),
+            };
+          }),
+        );
+
+        setCommandResults({
+          loading: false,
+          error: '',
+          groups: groups.filter((group) => group.items.length),
+        });
+        setActiveCommandIndex(0);
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          setCommandResults({
+            loading: false,
+            error: error.message || 'Unable to search the catalog.',
+            groups: [],
+          });
+          setActiveCommandIndex(0);
+        }
+      }
+    }
+
+    loadCommandResults();
+    return () => controller.abort();
+  }, [debouncedCommandQuery, isSearchPaletteOpen, session]);
+
+  useEffect(() => {
+    if (!isSearchPaletteOpen) {
+      return undefined;
+    }
+
+    const input = commandInputRef.current;
+    if (input) {
+      input.focus();
+      input.select();
+    }
+
+    const handleKeyDown = (event) => {
+      if ((event.key === 'k' && (event.metaKey || event.ctrlKey)) || (event.key === '/' && !isTypingTarget(event.target))) {
+        event.preventDefault();
+        setIsSearchPaletteOpen(true);
+        setIsBrowseMenuOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+
+      if (event.key === 'ArrowDown' && commandResultItems.length) {
+        event.preventDefault();
+        setActiveCommandIndex((current) => (current + 1) % commandResultItems.length);
+      }
+
+      if (event.key === 'ArrowUp' && commandResultItems.length) {
+        event.preventDefault();
+        setActiveCommandIndex((current) => (current - 1 + commandResultItems.length) % commandResultItems.length);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [commandResultItems.length, isSearchPaletteOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.key === 'k' && (event.metaKey || event.ctrlKey)) || (event.key === '/' && !isTypingTarget(event.target))) {
+        event.preventDefault();
+        setIsSearchPaletteOpen(true);
+        setIsBrowseMenuOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -610,11 +761,35 @@ export default function App() {
   function toggleBrowseMenu() {
     setIsBrowseMenuOpen((current) => !current);
     setIsAccountMenuOpen(false);
+    setIsSearchPaletteOpen(false);
   }
 
   function toggleAccountMenu() {
     setIsAccountMenuOpen((current) => !current);
     setIsBrowseMenuOpen(false);
+    setIsSearchPaletteOpen(false);
+  }
+
+  function toggleSearchPalette() {
+    setIsSearchPaletteOpen((current) => !current);
+    setIsBrowseMenuOpen(false);
+    setIsAccountMenuOpen(false);
+  }
+
+  function selectCommandResult(item) {
+    setContentType(item.type);
+    setSelectedCategory('');
+    setSearch('');
+    setSelectedItem(item);
+    if (item.type === 'series') {
+      setSelectedEpisode(null);
+      setSelectedSeasonKey('');
+    }
+    setCommandQuery('');
+    setDebouncedCommandQuery('');
+    setCommandResults({ loading: false, error: '', groups: [] });
+    setActiveCommandIndex(0);
+    setIsSearchPaletteOpen(false);
   }
 
   if (!session) {
@@ -687,6 +862,20 @@ export default function App() {
         <div className="topbar-actions">
           <button
             type="button"
+            className={isSearchPaletteOpen ? 'search-trigger active' : 'search-trigger'}
+            aria-expanded={isSearchPaletteOpen}
+            aria-controls="search-palette"
+            onClick={toggleSearchPalette}
+          >
+            <span>
+              <Search size={16} />
+              Search
+            </span>
+            <small>Cmd+K</small>
+          </button>
+
+          <button
+            type="button"
             className={isBrowseMenuOpen ? 'browse-menu-trigger active' : 'browse-menu-trigger'}
             aria-expanded={isBrowseMenuOpen}
             aria-controls="browse-menu"
@@ -710,6 +899,106 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {isSearchPaletteOpen ? (
+        <>
+          <button
+            type="button"
+            className="browse-menu-backdrop"
+            aria-label="Close search"
+            onClick={() => setIsSearchPaletteOpen(false)}
+          />
+          <div className="search-palette" id="search-palette">
+            <div className="search-palette-shell">
+              <div className="search-palette-header">
+                <div>
+                  <h3>Search everything</h3>
+                  <p>Jump straight to live channels, movies, or series.</p>
+                </div>
+                <button
+                  type="button"
+                  className="browse-menu-close"
+                  onClick={() => setIsSearchPaletteOpen(false)}
+                  aria-label="Close search"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <label className="search-field search-palette-field">
+                <Search size={18} />
+                <input
+                  ref={commandInputRef}
+                  value={commandQuery}
+                  onChange={(event) => setCommandQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && commandResultItems[activeCommandIndex]) {
+                      event.preventDefault();
+                      selectCommandResult(commandResultItems[activeCommandIndex]);
+                    }
+                  }}
+                  placeholder="Search channels, movies, and series"
+                />
+              </label>
+
+              <div className="search-palette-body">
+                {!commandQuery.trim() ? (
+                  <div className="search-palette-empty">
+                    <strong>Type to search across your full catalog.</strong>
+                    <p>Use arrow keys to move and Enter to open the highlighted result.</p>
+                  </div>
+                ) : null}
+
+                {commandResults.loading ? <div className="search-palette-empty">Searching catalog...</div> : null}
+                {commandResults.error ? <div className="search-palette-empty">{commandResults.error}</div> : null}
+                {!commandResults.loading && !commandResults.error && commandQuery.trim() && !commandResults.groups.length ? (
+                  <div className="search-palette-empty">No matches found.</div>
+                ) : null}
+
+                {commandResults.groups.length ? (
+                  <div className="search-palette-groups">
+                    {commandResults.groups.map((group) => (
+                      <div key={group.id} className="search-palette-group">
+                        <div className="search-palette-group-header">
+                          <span>{group.label}</span>
+                          <strong>{group.items.length}</strong>
+                        </div>
+
+                        <div className="search-palette-result-list">
+                          {group.items.map((item) => {
+                            const resultIndex = commandResultItems.findIndex((entry) => `${entry.type}:${entry.id}` === `${item.type}:${item.id}`);
+                            const isActive = resultIndex === activeCommandIndex;
+
+                            return (
+                              <button
+                                key={`${item.type}:${item.id}`}
+                                type="button"
+                                className={isActive ? 'search-palette-result active' : 'search-palette-result'}
+                                onMouseEnter={() => setActiveCommandIndex(resultIndex)}
+                                onClick={() => selectCommandResult(item)}
+                              >
+                                <div>
+                                  <strong>{item.name}</strong>
+                                  <p>
+                                    {item.type === 'series'
+                                      ? item.year || getItemTypeLabel(item.type)
+                                      : item.categoryName || getItemTypeLabel(item.type)}
+                                  </p>
+                                </div>
+                                <span>{getItemTypeLabel(item.type)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {isBrowseMenuOpen ? (
         <>
@@ -740,7 +1029,7 @@ export default function App() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search streams"
+                placeholder="Filter current view"
               />
             </label>
 
