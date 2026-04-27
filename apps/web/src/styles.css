@@ -876,6 +876,12 @@ select {
   justify-content: flex-end;
 }
 
+.playback-mode-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .player-error,
 .error-banner,
 .empty-message {

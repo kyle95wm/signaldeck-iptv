@@ -14,7 +14,7 @@ function getDecodedAudioBytes(video) {
   return typeof decodedBytes === 'number' && Number.isFinite(decodedBytes) ? decodedBytes : null;
 }
 
-export default function PlayerPanel({ source, title, subtitle, poster, playbackModeLabel, onProxyFallback, onCompatFallback }) {
+export default function PlayerPanel({ source, title, subtitle, poster, playbackModeLabel, playbackModeDescription, onProxyFallback, onCompatFallback }) {
   const videoRef = useRef(null);
   const [volume, setVolume] = useState(1);
   const [playerError, setPlayerError] = useState('');
@@ -230,9 +230,15 @@ export default function PlayerPanel({ source, title, subtitle, poster, playbackM
 
         <div className="player-pill-group">
           <span className="stream-pill">{source?.extension?.toUpperCase() || 'IDLE'}</span>
-          {playbackModeLabel ? <span className="stream-pill stream-pill-secondary">{playbackModeLabel}</span> : null}
+          {playbackModeLabel ? (
+            <span className="stream-pill stream-pill-secondary" title={playbackModeDescription || playbackModeLabel}>
+              {playbackModeLabel}
+            </span>
+          ) : null}
         </div>
       </div>
+
+      {playbackModeDescription ? <p className="playback-mode-note">{playbackModeDescription}</p> : null}
 
       {playerError ? (
         <div className="player-error">

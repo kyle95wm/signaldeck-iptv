@@ -265,6 +265,30 @@ function getPlaybackModeLabel(deliveryMode, audioMode) {
   return deliveryMode === 'proxy' ? 'Server Proxy' : 'Direct Stream';
 }
 
+function getPlaybackModeDescription(deliveryMode, audioMode, configuredMode, usedProxyFallback) {
+  if (audioMode === 'aac-stereo') {
+    return 'This live stream is running through the server and transcoding audio to AAC stereo for browser compatibility.';
+  }
+
+  if (deliveryMode === 'proxy' && configuredMode === 'proxy') {
+    return 'This deployment is configured to always route playback through the server.';
+  }
+
+  if (deliveryMode === 'proxy' && usedProxyFallback) {
+    return 'Direct playback did not hold for this stream, so SignalDeck retried it through the server proxy.';
+  }
+
+  if (deliveryMode === 'proxy') {
+    return 'This stream is currently routed through the server proxy.';
+  }
+
+  if (configuredMode === 'direct') {
+    return 'This deployment is configured to fetch media directly from the provider whenever possible.';
+  }
+
+  return 'This stream is being fetched directly from the provider instead of the SignalDeck server.';
+}
+
 export default function App() {
   const [credentials, setCredentials] = useState({ serverUrl: '', username: '', password: '' });
   const [session, setSession] = useState(() => readStorage(sessionKey, null));
@@ -617,6 +641,9 @@ export default function App() {
 
     return activePlaybackTarget && proxyFallbackTarget === activePlaybackTarget ? 'proxy' : 'direct';
   }, [activePlaybackTarget, liveAudioMode, proxyFallbackTarget]);
+  const usedProxyFallback = useMemo(() => {
+    return Boolean(activePlaybackTarget && proxyFallbackTarget === activePlaybackTarget);
+  }, [activePlaybackTarget, proxyFallbackTarget]);
   const playbackSource = useMemo(
     () => buildPlaybackSource(session, activePlayableItem, liveFormat, liveAudioMode, playbackDeliveryMode),
     [activePlayableItem, liveAudioMode, liveFormat, playbackDeliveryMode, session],
@@ -1423,6 +1450,7 @@ export default function App() {
                 source={playbackSource}
                 title={activePlayableItem?.name || selectedItem?.name}
                 playbackModeLabel={getPlaybackModeLabel(playbackDeliveryMode, liveAudioMode)}
+                playbackModeDescription={getPlaybackModeDescription(playbackDeliveryMode, liveAudioMode, configuredPlaybackMode, usedProxyFallback)}
                 onProxyFallback={requestPlaybackProxyFallback}
                 onCompatFallback={requestLiveAudioCompatFallback}
                 subtitle={
