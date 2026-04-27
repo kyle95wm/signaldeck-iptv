@@ -714,6 +714,108 @@ select {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.series-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.series-summary-card {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.series-summary-card h3 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.15rem;
+}
+
+.series-summary-card p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.series-summary-meta {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.series-summary-meta span {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+
+.series-browser {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.series-season-tabs {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.series-season-tabs button {
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+.series-season-tabs button.active {
+  background: rgba(255, 138, 61, 0.14);
+  color: var(--text);
+  border: 1px solid rgba(255, 138, 61, 0.38);
+}
+
+.series-episode-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.series-episode-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.series-episode-card.active {
+  border-color: rgba(105, 210, 176, 0.38);
+  background: rgba(105, 210, 176, 0.08);
+}
+
+.series-episode-copy strong {
+  display: block;
+}
+
+.series-episode-copy p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}
+
+.series-episode-card span {
+  color: var(--accent-alt);
+  white-space: nowrap;
+}
+
 .epg-heading {
   align-items: flex-start;
 }
@@ -879,7 +981,8 @@ select {
   .list-header,
   .player-toolbar,
   .player-footer,
-  .epg-entry {
+  .epg-entry,
+  .series-episode-card {
     flex-direction: column;
     align-items: stretch;
   }
@@ -927,7 +1030,8 @@ select {
   }
 
   .stream-grid,
-  .epg-day-list {
+  .epg-day-list,
+  .series-episode-list {
     max-height: none;
     padding-right: 0;
   }
@@ -949,12 +1053,14 @@ select {
 
   .player-toolbar p,
   .stream-card-copy p,
-  .epg-entry p {
+  .epg-entry p,
+  .series-episode-copy p {
     overflow-wrap: anywhere;
     white-space: normal;
   }
 
-  .epg-entry span {
+  .epg-entry span,
+  .series-episode-card span {
     white-space: normal;
   }
 }

@@ -14,11 +14,13 @@ app.use(morgan('dev'));
 const categoryActions = {
   live: 'get_live_categories',
   vod: 'get_vod_categories',
+  series: 'get_series_categories',
 };
 
 const streamActions = {
   live: 'get_live_streams',
   vod: 'get_vod_streams',
+  series: 'get_series',
 };
 
 function normalizeServerUrl(serverUrl) {
@@ -81,6 +83,11 @@ function buildStreamUrl({ serverUrl, username, password, contentType, streamId, 
     return `${baseUrl}/live/${username}/${password}/${streamId}.${liveExtension}`;
   }
 
+  if (contentType === 'series') {
+    const seriesExtension = extension || 'mp4';
+    return `${baseUrl}/series/${username}/${password}/${streamId}.${seriesExtension}`;
+  }
+
   const vodExtension = extension || 'mp4';
   return `${baseUrl}/movie/${username}/${password}/${streamId}.${vodExtension}`;
 }
@@ -95,17 +102,66 @@ function mapCategory(category) {
 
 function mapItem(item, contentType) {
   return {
-    id: item.stream_id,
+    id: item.stream_id || item.series_id,
     name: item.name,
     categoryId: item.category_id,
-    logo: item.stream_icon || '',
+    logo: item.stream_icon || item.cover || '',
     type: contentType,
     added: item.added || null,
     epgChannelId: item.epg_channel_id || null,
     rating: item.rating || null,
-    plot: item.plot || '',
+    plot: item.plot || item.series_plot || '',
     containerExtension: item.container_extension || null,
-    year: item.year || null,
+    year: item.year || item.releaseDate || null,
+  };
+}
+
+function mapSeriesEpisode(episode, seasonNumber) {
+  const info = episode.info || {};
+  const episodeId = episode.id || episode.episode_id || info.id;
+
+  return {
+    id: episodeId,
+    name: episode.title || episode.name || info.name || `Episode ${episode.episode_num || ''}`.trim(),
+    type: 'series',
+    seasonNumber: Number(seasonNumber) || seasonNumber,
+    seasonLabel: `Season ${seasonNumber}`,
+    episodeNumber: episode.episode_num || info.episode_num || null,
+    plot: decodeMaybeBase64(info.plot || episode.plot || ''),
+    logo: info.movie_image || episode.cover_big || episode.cover || '',
+    containerExtension: episode.container_extension || info.container_extension || 'mp4',
+    added: episode.added || info.added || null,
+    rating: info.rating || episode.rating || null,
+    airDate: info.releaseDate || episode.releaseDate || null,
+  };
+}
+
+function mapSeriesInfo(payload, seriesId) {
+  const info = payload?.info || {};
+  const rawEpisodes = payload?.episodes || {};
+  const seasons = Object.entries(rawEpisodes)
+    .map(([seasonNumber, episodes]) => ({
+      key: String(seasonNumber),
+      label: `Season ${seasonNumber}`,
+      episodes: (Array.isArray(episodes) ? episodes : [])
+        .map((episode) => mapSeriesEpisode(episode, seasonNumber))
+        .filter((episode) => episode.id),
+    }))
+    .filter((season) => season.episodes.length)
+    .sort((left, right) => Number(left.key) - Number(right.key));
+
+  return {
+    series: {
+      id: seriesId,
+      name: info.name || payload?.series_name || 'Untitled series',
+      plot: decodeMaybeBase64(info.plot || payload?.plot || ''),
+      logo: info.cover_big || info.cover || '',
+      rating: info.rating || null,
+      year: info.releaseDate || info.year || null,
+      genre: info.genre || null,
+      cast: info.cast || null,
+    },
+    seasons,
   };
 }
 
@@ -279,6 +335,30 @@ app.get('/api/catalog', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Unable to load Xtream catalog.' });
+  }
+});
+
+app.get('/api/series/:seriesId', async (req, res) => {
+  const { seriesId } = req.params;
+  const { serverUrl, username, password } = req.query;
+
+  if (!serverUrl || !username || !password) {
+    res.status(400).json({ error: 'Missing Xtream credentials.' });
+    return;
+  }
+
+  try {
+    const payload = await xtreamRequest({
+      serverUrl,
+      username,
+      password,
+      action: 'get_series_info',
+      params: { series_id: seriesId },
+    });
+
+    res.json(mapSeriesInfo(payload, seriesId));
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Unable to load series data.' });
   }
 });
 

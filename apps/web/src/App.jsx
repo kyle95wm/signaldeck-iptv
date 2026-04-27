@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Film, Heart, Radio, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Clapperboard, Film, Heart, Radio, Search, SlidersHorizontal, Tv, X } from 'lucide-react';
 import VirtualizedStreamList from './components/VirtualizedStreamList';
 
 const sessionKey = 'signaldeck-session';
@@ -8,6 +8,7 @@ const favoritesKey = 'signaldeck-favorites';
 const views = [
   { id: 'live', label: 'Live TV', icon: Radio },
   { id: 'vod', label: 'Movies', icon: Film },
+  { id: 'series', label: 'TV Series', icon: Tv },
 ];
 
 const PlayerPanel = lazy(() => import('./components/PlayerPanel'));
@@ -197,6 +198,7 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedEpisode, setSelectedEpisode] = useState(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState({ loading: false, error: '', authLoading: false });
@@ -212,6 +214,8 @@ export default function App() {
   const [plainVisibleCount, setPlainVisibleCount] = useState(0);
   const [isBrowseMenuOpen, setIsBrowseMenuOpen] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [seriesDetail, setSeriesDetail] = useState({ loading: false, error: '', series: null, seasons: [] });
+  const [selectedSeasonKey, setSelectedSeasonKey] = useState('');
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -299,6 +303,11 @@ export default function App() {
           const stillExists = payload.items.find((item) => item.id === current?.id);
           return stillExists || null;
         });
+        if (contentType !== 'series') {
+          setSelectedEpisode(null);
+          setSelectedSeasonKey('');
+          setSeriesDetail({ loading: false, error: '', series: null, seasons: [] });
+        }
       } catch (error) {
         if (error.name !== 'AbortError') {
           setStatus((current) => ({
@@ -314,6 +323,63 @@ export default function App() {
     loadCatalog();
     return () => controller.abort();
   }, [contentType, debouncedSearch, selectedCategory, session]);
+
+  useEffect(() => {
+    if (!session || contentType !== 'series' || !selectedItem?.id) {
+      setSeriesDetail({ loading: false, error: '', series: null, seasons: [] });
+      setSelectedEpisode(null);
+      setSelectedSeasonKey('');
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadSeries() {
+      setSeriesDetail((current) => ({ ...current, loading: true, error: '' }));
+      const params = new URLSearchParams({
+        serverUrl: session.serverUrl,
+        username: session.username,
+        password: session.password,
+      });
+
+      try {
+        const response = await fetch(`/api/series/${selectedItem.id}?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || 'Unable to load series details.');
+        }
+
+        setSeriesDetail({
+          loading: false,
+          error: '',
+          series: payload.series || null,
+          seasons: payload.seasons || [],
+        });
+
+        const firstSeason = payload.seasons?.[0] || null;
+        setSelectedSeasonKey((current) => {
+          const hasCurrent = payload.seasons?.some((season) => season.key === current);
+          return hasCurrent ? current : firstSeason?.key || '';
+        });
+        setSelectedEpisode((current) => {
+          const flatEpisodes = (payload.seasons || []).flatMap((season) => season.episodes || []);
+          const stillExists = flatEpisodes.find((episode) => episode.id === current?.id);
+          return stillExists || firstSeason?.episodes?.[0] || null;
+        });
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          setSeriesDetail({ loading: false, error: error.message || 'Unable to load series details.', series: null, seasons: [] });
+          setSelectedEpisode(null);
+          setSelectedSeasonKey('');
+        }
+      }
+    }
+
+    loadSeries();
+    return () => controller.abort();
+  }, [contentType, selectedItem?.id, session]);
 
   useEffect(() => {
     if (!session || contentType !== 'live' || !selectedItem?.id) {
@@ -419,9 +485,12 @@ export default function App() {
 
     return items.slice(0, plainVisibleCount);
   }, [items, plainVisibleCount, usePlainStreamList]);
+  const activePlayableItem = useMemo(() => {
+    return contentType === 'series' ? selectedEpisode : selectedItem;
+  }, [contentType, selectedEpisode, selectedItem]);
   const playbackSource = useMemo(
-    () => buildPlaybackSource(session, selectedItem, liveFormat),
-    [liveFormat, selectedItem, session],
+    () => buildPlaybackSource(session, activePlayableItem, liveFormat),
+    [activePlayableItem, liveFormat, session],
   );
   const guideSummary = useMemo(() => getGuideSummary(epg.listings, guideNow), [epg.listings, guideNow]);
   const currentProgram = useMemo(
@@ -534,6 +603,9 @@ export default function App() {
   const selectedCategoryLabel = categories.find((category) => category.id === selectedCategory)?.name || 'All categories';
   const activeConnections = session?.userInfo?.active_cons;
   const maxConnections = session?.userInfo?.max_connections;
+  const activeSeason = useMemo(() => {
+    return seriesDetail.seasons.find((season) => season.key === selectedSeasonKey) || seriesDetail.seasons[0] || null;
+  }, [selectedSeasonKey, seriesDetail.seasons]);
 
   function toggleBrowseMenu() {
     setIsBrowseMenuOpen((current) => !current);
@@ -755,6 +827,8 @@ export default function App() {
                       setContentType(view.id);
                       setSelectedCategory('');
                       setSelectedItem(null);
+                      setSelectedEpisode(null);
+                      setSelectedSeasonKey('');
                       setIsBrowseMenuOpen(false);
                     }}
                   >
@@ -770,7 +844,7 @@ export default function App() {
             <div className="content-list">
               <div className="list-header">
                 <div>
-                  <h2>{contentType === 'live' ? 'Channels' : 'Movie catalog'}</h2>
+                  <h2>{contentType === 'live' ? 'Channels' : contentType === 'vod' ? 'Movie catalog' : 'TV series'}</h2>
                   <p>{items.length} results loaded</p>
                 </div>
                 <div className="list-header-actions">
@@ -813,7 +887,7 @@ export default function App() {
                         </div>
                         <div className="stream-card-copy">
                           <h3>{item.name}</h3>
-                          <p>{contentType === 'live' ? 'Tap to play' : item.categoryId || 'Unsorted'}</p>
+                          <p>{contentType === 'live' ? 'Tap to play' : contentType === 'series' ? item.year || 'Select a series' : item.categoryId || 'Unsorted'}</p>
                         </div>
                         <button
                           type="button"
@@ -836,7 +910,7 @@ export default function App() {
                         className="secondary-button"
                         onClick={() => setPlainVisibleCount((current) => current + plainPageSize)}
                       >
-                        Load {Math.min(plainPageSize, items.length - plainVisibleCount)} more {contentType === 'live' ? 'channels' : 'titles'}
+                        Load {Math.min(plainPageSize, items.length - plainVisibleCount)} more {contentType === 'live' ? 'channels' : contentType === 'series' ? 'series' : 'titles'}
                       </button>
                       <p>
                         Showing {plainVisibleItems.length} of {items.length}
@@ -905,13 +979,17 @@ export default function App() {
             <Suspense fallback={<div className="player-panel-skeleton">Loading player...</div>}>
               <PlayerPanel
                 source={playbackSource}
-                title={selectedItem?.name}
+                title={activePlayableItem?.name || selectedItem?.name}
                 subtitle={
-                  currentProgram
+                  contentType === 'series'
+                    ? selectedEpisode
+                      ? `${selectedItem?.name || ''}${selectedEpisode.seasonLabel ? `  ${selectedEpisode.seasonLabel}` : ''}${selectedEpisode.episodeNumber ? `  Episode ${selectedEpisode.episodeNumber}` : ''}`
+                      : seriesDetail.series?.plot || 'Select a series to browse episodes.'
+                    : currentProgram
                     ? `${formatGuideRange(currentProgram)}  ${currentProgram.title}`
                     : selectedItem?.plot || selectedItem?.epgChannelId || 'Select a title to inspect it here.'
                 }
-                poster={selectedItem?.logo}
+                poster={activePlayableItem?.logo || selectedItem?.logo}
               />
             </Suspense>
           </div>
@@ -991,6 +1069,74 @@ export default function App() {
                           </article>
                         );
                       })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {contentType === 'series' ? (
+            <section className="series-panel">
+              <div className="section-heading series-heading">
+                <div>
+                  <h2>Episodes</h2>
+                  <p>{selectedItem?.name ? `Browse episodes for ${selectedItem.name}` : 'Select a series'}</p>
+                </div>
+                {seriesDetail.loading ? <span className="stream-pill epg-pill">Loading</span> : null}
+              </div>
+
+              {seriesDetail.error ? <div className="empty-message">{seriesDetail.error}</div> : null}
+              {!seriesDetail.loading && !seriesDetail.error && !seriesDetail.seasons.length ? (
+                <div className="empty-message">No episodes are available for this series.</div>
+              ) : null}
+
+              {seriesDetail.series ? (
+                <article className="series-summary-card">
+                  <div>
+                    <h3>{seriesDetail.series.name}</h3>
+                    <p>{seriesDetail.series.plot || 'No description provided.'}</p>
+                  </div>
+                  <div className="series-summary-meta">
+                    {seriesDetail.series.year ? <span>{seriesDetail.series.year}</span> : null}
+                    {seriesDetail.series.genre ? <span>{seriesDetail.series.genre}</span> : null}
+                  </div>
+                </article>
+              ) : null}
+
+              {seriesDetail.seasons.length ? (
+                <div className="series-browser">
+                  <div className="series-season-tabs">
+                    {seriesDetail.seasons.map((season) => (
+                      <button
+                        key={season.key}
+                        type="button"
+                        className={season.key === activeSeason?.key ? 'active' : ''}
+                        onClick={() => {
+                          setSelectedSeasonKey(season.key);
+                          setSelectedEpisode((current) => season.episodes.find((episode) => episode.id === current?.id) || season.episodes[0] || null);
+                        }}
+                      >
+                        {season.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeSeason ? (
+                    <div className="series-episode-list">
+                      {activeSeason.episodes.map((episode) => (
+                        <article
+                          key={episode.id}
+                          className={selectedEpisode?.id === episode.id ? 'series-episode-card active' : 'series-episode-card'}
+                          onClick={() => setSelectedEpisode(episode)}
+                        >
+                          <div className="series-episode-copy">
+                            <strong>{episode.episodeNumber ? `Episode ${episode.episodeNumber}: ` : ''}{episode.name}</strong>
+                            <p>{episode.plot || 'No synopsis provided.'}</p>
+                          </div>
+                          <span>{episode.airDate || episode.containerExtension?.toUpperCase() || 'Episode'}</span>
+                        </article>
+                      ))}
                     </div>
                   ) : null}
                 </div>
