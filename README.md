@@ -4,11 +4,26 @@ SignalDeck IPTV is a Docker-ready web player for Xtream Codes IPTV services. It 
 
 - Xtream Codes login against `player_api.php`
 - Live TV and movie catalog browsing
+- TV series browsing with season and episode selection
 - EPG guide support with current, upcoming, and full-day views
 - In-browser playback through a local proxy for HLS manifests and media segments
 - Local favorites stored in the browser
 - Search and category filtering without forced auto-switch playback
 - A responsive interface built with React and Vite
+
+## Screenshots
+
+These screenshots were captured from the local app. The sign-in screen is live, and the catalog examples use demo data to avoid exposing provider credentials in the repository.
+
+<p>
+	<img src="./docs/screenshots/sign-in.png" alt="SignalDeck sign-in screen" width="48%" />
+	<img src="./docs/screenshots/account-menu.png" alt="SignalDeck account menu showing connection counts" width="48%" />
+</p>
+
+<p>
+	<img src="./docs/screenshots/live-tv.png" alt="SignalDeck live TV browser with guide panel" width="48%" />
+	<img src="./docs/screenshots/series-view.png" alt="SignalDeck TV series browser with episodes" width="48%" />
+</p>
 
 ## Notes
 
@@ -63,9 +78,11 @@ Enter:
 - Username
 - Password
 
-The app uses the Xtream Codes API to load live categories, live streams, VOD categories, and VOD streams. Live playback defaults to HLS (`.m3u8`) and can be switched to MPEG-TS (`.ts`) from the UI.
+The app uses the Xtream Codes API to load live categories, live streams, VOD categories, VOD streams, series categories, and series metadata. Live playback defaults to HLS (`.m3u8`) and can be switched to MPEG-TS (`.ts`) from the UI.
 
 For live channels, the app also loads short EPG data and shows current and upcoming programming when the provider exposes guide data.
+
+TV series support depends on the provider exposing the Xtream series endpoints (`get_series_categories`, `get_series`, and `get_series_info`).
 
 ## Mobile browser support
 
@@ -88,4 +105,4 @@ Known mobile limits:
 
 - Some providers return codecs or transport formats that certain browsers cannot decode.
 - The proxy helps with HLS playback and relative segment URLs, but it cannot fix unsupported codecs.
-- TV series endpoints are not implemented in this version.
+- TV series support varies by provider. Some services expose live and movie catalogs but do not return series metadata or episodes.
