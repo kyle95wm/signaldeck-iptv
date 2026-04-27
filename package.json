@@ -1,0 +1,18 @@
+{
+  "name": "iptvplayer",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/server",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:server dev:web",
+    "dev:server": "npm run dev --workspace @iptvplayer/server",
+    "dev:web": "npm run dev --workspace @iptvplayer/web",
+    "build": "npm run build --workspace @iptvplayer/server && npm run build --workspace @iptvplayer/web"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
