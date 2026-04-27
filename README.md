@@ -6,7 +6,7 @@ SignalDeck IPTV is a Docker-ready web player for Xtream Codes IPTV services. It 
 - Live TV and movie catalog browsing
 - TV series browsing with season and episode selection
 - EPG guide support with current, upcoming, and full-day views
-- In-browser playback through a local proxy for HLS manifests and media segments
+- Hybrid playback that prefers direct provider streams and falls back to the server proxy when needed
 - Local favorites stored in the browser
 - Search and category filtering without forced auto-switch playback
 - A responsive interface built with React and Vite
@@ -56,6 +56,18 @@ If you want a different host port for the web app, set `WEB_PORT` when starting 
 WEB_PORT=8080 docker compose up --build
 ```
 
+Playback delivery is configurable at build time with `VITE_PLAYBACK_MODE`:
+
+- `hybrid`: direct provider playback first, then server proxy fallback, then AAC fallback for live streams
+- `direct`: direct provider playback only, except live AAC compatibility mode still routes through the server
+- `proxy`: always route playback through the server
+
+Example:
+
+```bash
+VITE_PLAYBACK_MODE=proxy docker compose up --build
+```
+
 ## Run locally without Docker
 
 ```bash
@@ -70,6 +82,12 @@ This starts:
 
 For local development, call the API directly on port 3001. In Docker, Nginx forwards `/api/*` to the server container.
 
+You can also set the playback mode for local frontend builds:
+
+```bash
+VITE_PLAYBACK_MODE=hybrid npm run dev --workspace @iptvplayer/web
+```
+
 ## Xtream Codes notes
 
 Enter:
@@ -78,7 +96,7 @@ Enter:
 - Username
 - Password
 
-The app uses the Xtream Codes API to load live categories, live streams, VOD categories, VOD streams, series categories, and series metadata. Live playback defaults to HLS (`.m3u8`) and can be switched to MPEG-TS (`.ts`) from the UI.
+The app uses the Xtream Codes API to load live categories, live streams, VOD categories, VOD streams, series categories, and series metadata. Live playback defaults to HLS (`.m3u8`) and can be switched to MPEG-TS (`.ts`) from the UI. Depending on `VITE_PLAYBACK_MODE`, playback can be direct from the provider, proxied through the server, or hybrid with proxy fallback.
 
 For live channels, the app also loads short EPG data and shows current and upcoming programming when the provider exposes guide data.
 
@@ -104,5 +122,5 @@ Known mobile limits:
 ## Limitations
 
 - Some providers return codecs or transport formats that certain browsers cannot decode.
-- The proxy helps with HLS playback and relative segment URLs, but it cannot fix unsupported codecs.
+- The server proxy helps with HLS playback and relative segment URLs, but it cannot fix unsupported codecs. In `direct` mode, provider CORS or stream quirks may prevent playback for some services.
 - TV series support varies by provider. Some services expose live and movie catalogs but do not return series metadata or episodes.

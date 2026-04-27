@@ -853,11 +853,27 @@ select {
 }
 
 .stream-pill {
+  display: inline-flex;
+  align-items: center;
   padding: 0.35rem 0.7rem;
   border-radius: 999px;
   color: #07111f;
   background: var(--accent-alt);
   font-weight: 700;
+}
+
+.stream-pill-secondary {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+}
+
+.player-pill-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .player-error,

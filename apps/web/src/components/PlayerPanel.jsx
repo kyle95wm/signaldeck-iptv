@@ -14,7 +14,7 @@ function getDecodedAudioBytes(video) {
   return typeof decodedBytes === 'number' && Number.isFinite(decodedBytes) ? decodedBytes : null;
 }
 
-export default function PlayerPanel({ source, title, subtitle, poster, onCompatFallback }) {
+export default function PlayerPanel({ source, title, subtitle, poster, playbackModeLabel, onProxyFallback, onCompatFallback }) {
   const videoRef = useRef(null);
   const [volume, setVolume] = useState(1);
   const [playerError, setPlayerError] = useState('');
@@ -36,6 +36,28 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
     const requestCompatFallback = () => {
       if (typeof onCompatFallback === 'function') {
         return onCompatFallback();
+      }
+
+      return false;
+    };
+
+    const requestProxyFallback = () => {
+      if (typeof onProxyFallback === 'function') {
+        return onProxyFallback();
+      }
+
+      return false;
+    };
+
+    const requestNextFallback = () => {
+      if (source?.deliveryMode === 'direct' && requestProxyFallback()) {
+        setPlayerError('Retrying this stream through the server compatibility proxy...');
+        return true;
+      }
+
+      if (requestCompatFallback()) {
+        setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+        return true;
       }
 
       return false;
@@ -71,9 +93,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
         const elapsedTime = video.currentTime - initialTime;
         const nextDecodedBytes = getDecodedAudioBytes(video);
         if (elapsedTime >= 2 && nextDecodedBytes !== null && nextDecodedBytes <= initialDecodedBytes) {
-          if (requestCompatFallback()) {
-            setPlayerError('Retrying this live stream with AAC stereo compatibility...');
-          }
+          requestNextFallback();
         }
       }, 4000);
     };
@@ -85,8 +105,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
     };
 
     const onVideoError = () => {
-      if (requestCompatFallback()) {
-        setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+      if (requestNextFallback()) {
         return;
       }
 
@@ -119,8 +138,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
-              if (requestCompatFallback()) {
-                setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+              if (requestNextFallback()) {
                 return;
               }
 
@@ -136,8 +154,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
     }
 
     loadSource().catch(() => {
-      if (requestCompatFallback()) {
-        setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+      if (requestNextFallback()) {
         return;
       }
 
@@ -156,7 +173,7 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
       video.removeAttribute('src');
       video.load();
     };
-  }, [isHls, onCompatFallback, source?.url]);
+  }, [isHls, onCompatFallback, onProxyFallback, source?.deliveryMode, source?.url]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -211,7 +228,10 @@ export default function PlayerPanel({ source, title, subtitle, poster, onCompatF
           />
         </label>
 
-        <span className="stream-pill">{source?.extension?.toUpperCase() || 'IDLE'}</span>
+        <div className="player-pill-group">
+          <span className="stream-pill">{source?.extension?.toUpperCase() || 'IDLE'}</span>
+          {playbackModeLabel ? <span className="stream-pill stream-pill-secondary">{playbackModeLabel}</span> : null}
+        </div>
       </div>
 
       {playerError ? (

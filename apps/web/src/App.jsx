@@ -5,6 +5,9 @@ import VirtualizedStreamList from './components/VirtualizedStreamList';
 const sessionKey = 'signaldeck-session';
 const favoritesKey = 'signaldeck-favorites';
 const liveAudioModeKey = 'signaldeck-live-audio-mode';
+const configuredPlaybackMode = ['hybrid', 'direct', 'proxy'].includes(import.meta.env.VITE_PLAYBACK_MODE)
+  ? import.meta.env.VITE_PLAYBACK_MODE
+  : 'hybrid';
 
 const views = [
   { id: 'live', label: 'Live TV', icon: Radio },
@@ -161,7 +164,33 @@ function readStorage(key, fallback) {
   }
 }
 
-function buildPlaybackSource(session, item, outputFormat, audioMode) {
+function normalizeServerUrl(serverUrl) {
+  if (!serverUrl) {
+    return '';
+  }
+
+  const normalized = serverUrl.startsWith('http') ? serverUrl : `http://${serverUrl}`;
+  return normalized.replace(/\/$/, '');
+}
+
+function buildDirectPlaybackUrl(session, item, extension) {
+  const baseUrl = normalizeServerUrl(session?.serverUrl);
+  if (!baseUrl || !session?.username || !session?.password || !item?.id) {
+    return '';
+  }
+
+  if (item.type === 'live') {
+    return `${baseUrl}/live/${session.username}/${session.password}/${item.id}.${extension}`;
+  }
+
+  if (item.type === 'series') {
+    return `${baseUrl}/series/${session.username}/${session.password}/${item.id}.${extension}`;
+  }
+
+  return `${baseUrl}/movie/${session.username}/${session.password}/${item.id}.${extension}`;
+}
+
+function buildPlaybackSource(session, item, outputFormat, audioMode, deliveryMode) {
   if (!session || !item) {
     return null;
   }
@@ -170,6 +199,15 @@ function buildPlaybackSource(session, item, outputFormat, audioMode) {
   const playerExtension = item.type === 'live' && audioMode === 'aac-stereo'
     ? 'mp4'
     : upstreamExtension;
+
+  if (deliveryMode === 'direct' && audioMode !== 'aac-stereo') {
+    return {
+      url: buildDirectPlaybackUrl(session, item, upstreamExtension),
+      extension: playerExtension,
+      deliveryMode: 'direct',
+    };
+  }
+
   const params = new URLSearchParams({
     serverUrl: session.serverUrl,
     username: session.username,
@@ -184,6 +222,7 @@ function buildPlaybackSource(session, item, outputFormat, audioMode) {
   return {
     url: `/api/play/${item.type}/${item.id}?${params.toString()}`,
     extension: playerExtension,
+    deliveryMode: 'proxy',
   };
 }
 
@@ -218,6 +257,14 @@ function getItemTypeLabel(itemType) {
   return 'Movies';
 }
 
+function getPlaybackModeLabel(deliveryMode, audioMode) {
+  if (audioMode === 'aac-stereo') {
+    return 'AAC Fallback';
+  }
+
+  return deliveryMode === 'proxy' ? 'Server Proxy' : 'Direct Stream';
+}
+
 export default function App() {
   const [credentials, setCredentials] = useState({ serverUrl: '', username: '', password: '' });
   const [session, setSession] = useState(() => readStorage(sessionKey, null));
@@ -234,6 +281,7 @@ export default function App() {
   const [liveFormat, setLiveFormat] = useState(() => getPreferredLiveFormat(readStorage(sessionKey, null)));
   const [liveAudioMode, setLiveAudioMode] = useState(() => readStorage(liveAudioModeKey, 'direct'));
   const [autoCompatTarget, setAutoCompatTarget] = useState(null);
+  const [proxyFallbackTarget, setProxyFallbackTarget] = useState(null);
   const [epg, setEpg] = useState({ loading: false, error: '', listings: [] });
   const [channelGuideMap, setChannelGuideMap] = useState({});
   const [guideDay, setGuideDay] = useState('');
@@ -547,10 +595,40 @@ export default function App() {
 
     return `${session.serverUrl}:${activePlayableItem.id}`;
   }, [activePlayableItem, contentType, session]);
+  const activePlaybackTarget = useMemo(() => {
+    if (!session || !activePlayableItem) {
+      return null;
+    }
+
+    return `${session.serverUrl}:${activePlayableItem.type}:${activePlayableItem.id}`;
+  }, [activePlayableItem, session]);
+  const playbackDeliveryMode = useMemo(() => {
+    if (liveAudioMode === 'aac-stereo') {
+      return 'proxy';
+    }
+
+    if (configuredPlaybackMode === 'proxy') {
+      return 'proxy';
+    }
+
+    if (configuredPlaybackMode === 'direct') {
+      return 'direct';
+    }
+
+    return activePlaybackTarget && proxyFallbackTarget === activePlaybackTarget ? 'proxy' : 'direct';
+  }, [activePlaybackTarget, liveAudioMode, proxyFallbackTarget]);
   const playbackSource = useMemo(
-    () => buildPlaybackSource(session, activePlayableItem, liveFormat, liveAudioMode),
-    [activePlayableItem, liveAudioMode, liveFormat, session],
+    () => buildPlaybackSource(session, activePlayableItem, liveFormat, liveAudioMode, playbackDeliveryMode),
+    [activePlayableItem, liveAudioMode, liveFormat, playbackDeliveryMode, session],
   );
+
+  useEffect(() => {
+    if (!proxyFallbackTarget || !activePlaybackTarget || proxyFallbackTarget === activePlaybackTarget) {
+      return;
+    }
+
+    setProxyFallbackTarget(null);
+  }, [activePlaybackTarget, proxyFallbackTarget]);
 
   useEffect(() => {
     if (liveAudioMode !== 'aac-stereo' || !autoCompatTarget || !activeCompatTarget || autoCompatTarget === activeCompatTarget) {
@@ -560,8 +638,17 @@ export default function App() {
     setLiveAudioMode('direct');
   }, [activeCompatTarget, autoCompatTarget, liveAudioMode]);
 
+  const requestPlaybackProxyFallback = useCallback(() => {
+    if (configuredPlaybackMode === 'direct' || !activePlaybackTarget || playbackDeliveryMode !== 'direct') {
+      return false;
+    }
+
+    setProxyFallbackTarget(activePlaybackTarget);
+    return true;
+  }, [activePlaybackTarget, playbackDeliveryMode]);
+
   const requestLiveAudioCompatFallback = useCallback(() => {
-    if (contentType !== 'live' || !activePlayableItem || liveAudioMode !== 'direct' || !activeCompatTarget) {
+    if (contentType !== 'live' || !activePlayableItem || liveAudioMode !== 'direct' || !activeCompatTarget || playbackDeliveryMode !== 'proxy') {
       return false;
     }
 
@@ -572,7 +659,7 @@ export default function App() {
     setAutoCompatTarget(activeCompatTarget);
     setLiveAudioMode('aac-stereo');
     return true;
-  }, [activeCompatTarget, activePlayableItem, autoCompatTarget, contentType, liveAudioMode]);
+  }, [activeCompatTarget, activePlayableItem, autoCompatTarget, contentType, liveAudioMode, playbackDeliveryMode]);
   const guideSummary = useMemo(() => getGuideSummary(epg.listings, guideNow), [epg.listings, guideNow]);
   const currentProgram = useMemo(
     () => guideSummary.current || guideSummary.featured,
@@ -1335,6 +1422,8 @@ export default function App() {
               <PlayerPanel
                 source={playbackSource}
                 title={activePlayableItem?.name || selectedItem?.name}
+                playbackModeLabel={getPlaybackModeLabel(playbackDeliveryMode, liveAudioMode)}
+                onProxyFallback={requestPlaybackProxyFallback}
                 onCompatFallback={requestLiveAudioCompatFallback}
                 subtitle={
                   contentType === 'series'

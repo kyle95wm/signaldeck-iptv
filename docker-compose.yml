@@ -13,6 +13,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_PLAYBACK_MODE: ${VITE_PLAYBACK_MODE:-hybrid}
     ports:
       - "${WEB_PORT:-8090}:80"
     depends_on:
