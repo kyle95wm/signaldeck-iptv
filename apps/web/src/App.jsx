@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clapperboard, Film, Heart, Radio, Search, SlidersHorizontal, Tv, X } from 'lucide-react';
 import VirtualizedStreamList from './components/VirtualizedStreamList';
 
@@ -560,7 +560,7 @@ export default function App() {
     setLiveAudioMode('direct');
   }, [activeCompatTarget, autoCompatTarget, liveAudioMode]);
 
-  function requestLiveAudioCompatFallback() {
+  const requestLiveAudioCompatFallback = useCallback(() => {
     if (contentType !== 'live' || !activePlayableItem || liveAudioMode !== 'direct' || !activeCompatTarget) {
       return false;
     }
@@ -572,7 +572,7 @@ export default function App() {
     setAutoCompatTarget(activeCompatTarget);
     setLiveAudioMode('aac-stereo');
     return true;
-  }
+  }, [activeCompatTarget, activePlayableItem, autoCompatTarget, contentType, liveAudioMode]);
   const guideSummary = useMemo(() => getGuideSummary(epg.listings, guideNow), [epg.listings, guideNow]);
   const currentProgram = useMemo(
     () => guideSummary.current || guideSummary.featured,
