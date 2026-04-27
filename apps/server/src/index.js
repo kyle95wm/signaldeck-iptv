@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import cors from 'cors';
 import express from 'express';
 import morgan from 'morgan';
@@ -262,6 +263,95 @@ async function proxyRemote(req, res, targetUrl) {
   Readable.fromWeb(upstream.body).pipe(res);
 }
 
+async function transcodeLiveAudio(req, res, targetUrl) {
+  const ffmpegArgs = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-i',
+    targetUrl,
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'aac',
+    '-ac',
+    '2',
+    '-b:a',
+    '160k',
+    '-movflags',
+    'frag_keyframe+empty_moov+default_base_moof',
+    '-f',
+    'mp4',
+    'pipe:1',
+  ];
+
+  let stderrOutput = '';
+  let started = false;
+  const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const stopTranscode = () => {
+    if (!ffmpeg.killed) {
+      ffmpeg.kill('SIGKILL');
+    }
+  };
+
+  req.on('close', stopTranscode);
+  res.on('close', stopTranscode);
+
+  ffmpeg.stderr.on('data', (chunk) => {
+    stderrOutput += String(chunk);
+  });
+
+  ffmpeg.once('spawn', () => {
+    started = true;
+    res.status(200);
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    ffmpeg.stdout.pipe(res);
+  });
+
+  ffmpeg.once('error', (error) => {
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: error.message || 'Unable to start ffmpeg for audio compatibility mode.',
+      });
+      return;
+    }
+
+    res.end();
+  });
+
+  ffmpeg.once('close', (code) => {
+    req.off('close', stopTranscode);
+    res.off('close', stopTranscode);
+
+    if (code === 0) {
+      if (!res.writableEnded) {
+        res.end();
+      }
+      return;
+    }
+
+    if (!started && !res.headersSent) {
+      res.status(500).json({
+        error: stderrOutput.trim() || 'Unable to transcode this stream to AAC stereo.',
+      });
+      return;
+    }
+
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -441,7 +531,7 @@ app.get('/api/epg', async (req, res) => {
 
 app.get('/api/play/:contentType/:streamId', async (req, res) => {
   const { contentType, streamId } = req.params;
-  const { serverUrl, username, password, extension } = req.query;
+  const { serverUrl, username, password, extension, audioMode = 'direct' } = req.query;
 
   if (!serverUrl || !username || !password) {
     res.status(400).json({ error: 'Missing Xtream credentials.' });
@@ -457,6 +547,11 @@ app.get('/api/play/:contentType/:streamId', async (req, res) => {
       streamId,
       extension,
     });
+
+    if (contentType === 'live' && audioMode === 'aac-stereo') {
+      await transcodeLiveAudio(req, res, targetUrl);
+      return;
+    }
 
     await proxyRemote(req, res, targetUrl);
   } catch (error) {

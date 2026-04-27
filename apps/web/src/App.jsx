@@ -4,6 +4,7 @@ import VirtualizedStreamList from './components/VirtualizedStreamList';
 
 const sessionKey = 'signaldeck-session';
 const favoritesKey = 'signaldeck-favorites';
+const liveAudioModeKey = 'signaldeck-live-audio-mode';
 
 const views = [
   { id: 'live', label: 'Live TV', icon: Radio },
@@ -160,22 +161,29 @@ function readStorage(key, fallback) {
   }
 }
 
-function buildPlaybackSource(session, item, outputFormat) {
+function buildPlaybackSource(session, item, outputFormat, audioMode) {
   if (!session || !item) {
     return null;
   }
 
-  const extension = item.type === 'live' ? outputFormat : item.containerExtension || 'mp4';
+  const upstreamExtension = item.type === 'live' ? outputFormat : item.containerExtension || 'mp4';
+  const playerExtension = item.type === 'live' && audioMode === 'aac-stereo'
+    ? 'mp4'
+    : upstreamExtension;
   const params = new URLSearchParams({
     serverUrl: session.serverUrl,
     username: session.username,
     password: session.password,
-    extension,
+    extension: upstreamExtension,
   });
+
+  if (item.type === 'live' && audioMode) {
+    params.set('audioMode', audioMode);
+  }
 
   return {
     url: `/api/play/${item.type}/${item.id}?${params.toString()}`,
-    extension,
+    extension: playerExtension,
   };
 }
 
@@ -224,6 +232,8 @@ export default function App() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState({ loading: false, error: '', authLoading: false });
   const [liveFormat, setLiveFormat] = useState(() => getPreferredLiveFormat(readStorage(sessionKey, null)));
+  const [liveAudioMode, setLiveAudioMode] = useState(() => readStorage(liveAudioModeKey, 'direct'));
+  const [autoCompatTarget, setAutoCompatTarget] = useState(null);
   const [epg, setEpg] = useState({ loading: false, error: '', listings: [] });
   const [channelGuideMap, setChannelGuideMap] = useState({});
   const [guideDay, setGuideDay] = useState('');
@@ -264,6 +274,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(favoritesKey, JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    window.localStorage.setItem(liveAudioModeKey, JSON.stringify(liveAudioMode));
+  }, [liveAudioMode]);
 
   useEffect(() => {
     if (session) {
@@ -331,12 +345,12 @@ export default function App() {
         setCategories(payload.categories || []);
         setItems(payload.items || []);
         setSelectedItem((current) => {
-          if (!payload.items?.length) {
+          if (!current) {
             return null;
           }
 
-          const stillExists = payload.items.find((item) => item.id === current?.id);
-          return stillExists || null;
+          const stillExists = payload.items.find((item) => item.id === current.id);
+          return stillExists || current;
         });
         if (contentType !== 'series') {
           setSelectedEpisode(null);
@@ -526,10 +540,39 @@ export default function App() {
   const activePlayableItem = useMemo(() => {
     return contentType === 'series' ? selectedEpisode : selectedItem;
   }, [contentType, selectedEpisode, selectedItem]);
+  const activeCompatTarget = useMemo(() => {
+    if (!session || contentType !== 'live' || !activePlayableItem) {
+      return null;
+    }
+
+    return `${session.serverUrl}:${activePlayableItem.id}`;
+  }, [activePlayableItem, contentType, session]);
   const playbackSource = useMemo(
-    () => buildPlaybackSource(session, activePlayableItem, liveFormat),
-    [activePlayableItem, liveFormat, session],
+    () => buildPlaybackSource(session, activePlayableItem, liveFormat, liveAudioMode),
+    [activePlayableItem, liveAudioMode, liveFormat, session],
   );
+
+  useEffect(() => {
+    if (liveAudioMode !== 'aac-stereo' || !autoCompatTarget || !activeCompatTarget || autoCompatTarget === activeCompatTarget) {
+      return;
+    }
+
+    setLiveAudioMode('direct');
+  }, [activeCompatTarget, autoCompatTarget, liveAudioMode]);
+
+  function requestLiveAudioCompatFallback() {
+    if (contentType !== 'live' || !activePlayableItem || liveAudioMode !== 'direct' || !activeCompatTarget) {
+      return false;
+    }
+
+    if (autoCompatTarget === activeCompatTarget) {
+      return false;
+    }
+
+    setAutoCompatTarget(activeCompatTarget);
+    setLiveAudioMode('aac-stereo');
+    return true;
+  }
   const guideSummary = useMemo(() => getGuideSummary(epg.listings, guideNow), [epg.listings, guideNow]);
   const currentProgram = useMemo(
     () => guideSummary.current || guideSummary.featured,
@@ -1139,16 +1182,32 @@ export default function App() {
                 <div className="list-header-actions">
                   <span className="browse-summary-pill">{selectedCategoryLabel}</span>
                   {contentType === 'live' ? (
-                    <label className="format-select">
-                      Output
-                      <select value={liveFormat} onChange={(event) => setLiveFormat(event.target.value)}>
-                        {liveFormatOptions.map((format) => (
-                          <option key={format} value={format}>
-                            {format === 'm3u8' ? 'HLS (.m3u8)' : `${format.toUpperCase()} (.${format})`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <>
+                      <label className="format-select">
+                        Output
+                        <select value={liveFormat} onChange={(event) => setLiveFormat(event.target.value)}>
+                          {liveFormatOptions.map((format) => (
+                            <option key={format} value={format}>
+                              {format === 'm3u8' ? 'HLS (.m3u8)' : `${format.toUpperCase()} (.${format})`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="format-select">
+                        Audio
+                        <select
+                          value={liveAudioMode}
+                          onChange={(event) => {
+                            const nextMode = event.target.value;
+                            setAutoCompatTarget(null);
+                            setLiveAudioMode(nextMode);
+                          }}
+                        >
+                          <option value="direct">Direct</option>
+                          <option value="aac-stereo">AAC stereo compatibility</option>
+                        </select>
+                      </label>
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -1269,6 +1328,7 @@ export default function App() {
               <PlayerPanel
                 source={playbackSource}
                 title={activePlayableItem?.name || selectedItem?.name}
+                onCompatFallback={requestLiveAudioCompatFallback}
                 subtitle={
                   contentType === 'series'
                     ? selectedEpisode

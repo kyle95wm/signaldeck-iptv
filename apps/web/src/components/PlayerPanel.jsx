@@ -9,7 +9,7 @@ function canUseNativeHls(video) {
   return Boolean(video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL'));
 }
 
-export default function PlayerPanel({ source, title, subtitle, poster }) {
+export default function PlayerPanel({ source, title, subtitle, poster, onCompatFallback }) {
   const videoRef = useRef(null);
   const [volume, setVolume] = useState(1);
   const [playerError, setPlayerError] = useState('');
@@ -26,6 +26,14 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
     let hls;
     setPlayerError('');
 
+    const requestCompatFallback = () => {
+      if (typeof onCompatFallback === 'function') {
+        return onCompatFallback();
+      }
+
+      return false;
+    };
+
     const attemptPlayback = () => {
       video.play().catch(() => {
         setPlayerError('Playback is ready. Press Play if your browser blocked auto-start.');
@@ -33,6 +41,11 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
     };
 
     const onVideoError = () => {
+      if (requestCompatFallback()) {
+        setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+        return;
+      }
+
       setPlayerError('The browser could not load this stream. Try another live output format.');
     };
 
@@ -61,7 +74,12 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
-              setPlayerError('This stream could not be decoded in the browser. Try another output format.');
+              if (requestCompatFallback()) {
+                setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+                return;
+              }
+
+              setPlayerError('This stream could not be decoded in the browser. Try another output format or enable AAC stereo compatibility.');
             }
           });
           return;
@@ -73,7 +91,12 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
     }
 
     loadSource().catch(() => {
-      setPlayerError('The player failed to initialize this stream. Try another output format.');
+      if (requestCompatFallback()) {
+        setPlayerError('Retrying this live stream with AAC stereo compatibility...');
+        return;
+      }
+
+      setPlayerError('The player failed to initialize this stream. Try another output format or enable AAC stereo compatibility.');
     });
 
     return () => {
@@ -86,7 +109,7 @@ export default function PlayerPanel({ source, title, subtitle, poster }) {
       video.removeAttribute('src');
       video.load();
     };
-  }, [isHls, source?.url]);
+  }, [isHls, onCompatFallback, source?.url]);
 
   useEffect(() => {
     const video = videoRef.current;
